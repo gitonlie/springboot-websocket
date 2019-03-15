@@ -1,0 +1,9 @@
+spring:
+  mvc:
+    view:
+      prefix: /pages/
+      suffix: .jsp
+
+server:
+  port: 8080
+  url: http://b8a53acb.ap.ngrok.io
