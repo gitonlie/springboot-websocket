@@ -1,11 +1,8 @@
 package priv.gitonlie.websocket.configure;
 
 import java.io.IOException;
-import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
-
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.servlet.http.HttpSession;
 import javax.websocket.CloseReason;
 import javax.websocket.EndpointConfig;
@@ -16,85 +13,74 @@ import javax.websocket.OnOpen;
 import javax.websocket.Session;
 import javax.websocket.server.PathParam;
 import javax.websocket.server.ServerEndpoint;
-
 import org.springframework.stereotype.Component;
-
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
-@ServerEndpoint(value="/websocket",configurator=HttpSessionConfigurator.class)
+@ServerEndpoint(value="/websocket/{sid}",configurator=HttpSessionConfigurator.class)
 public class ServerEndpointConfigure {
-		
-	//静态变量，用来记录当前在线连接数。应该把它设计成线程安全的。
-    private static int onlineCount = 0;
+
+	//设定原子整型,用来记录当前在线连接数
+    private AtomicInteger onlineCount = new AtomicInteger(0);
     //concurrent包的线程安全Set，用来存放每个客户端对应的MyWebSocket对象。
-    private static CopyOnWriteArraySet<ServerEndpointConfigure> webSocketSet = new CopyOnWriteArraySet<ServerEndpointConfigure>();
+//    private static CopyOnWriteArraySet<ServerEndpointConfigure> webSocketSet = new CopyOnWriteArraySet<ServerEndpointConfigure>();
     //若要实现服务端与指定客户端通信的话，可以使用Map来存放，其中Key可以为用户标识
-    public static ConcurrentHashMap<Session,Object> webSocketMap = new ConcurrentHashMap<Session,Object>();
-    //绑定token与session
+//    public static ConcurrentHashMap<Session,Object> webSocketMap = new ConcurrentHashMap<Session,Object>();
+    
+    //绑定HttpSession与session
     public static ConcurrentHashMap<String,Session> bizSession = new ConcurrentHashMap<String,Session>();
 	//与某个客户端的连接会话，需要通过它来给客户端发送数据
     private Session session;
  
     /**
-     * 连接建立成功调用的方法
+     * <p>连接建立成功调用的方法</p>
      * @throws IOException 
      **/
     @OnOpen
-    public void onOpen(Session session,EndpointConfig config) throws IOException {
+    public void onOpen(Session session,EndpointConfig config,@PathParam("sid") String sid) throws IOException {
         this.session = session;
-        Map<String, Object> userProperties = config.getUserProperties();
-        HttpSession httpSession = (HttpSession) userProperties.get(HttpSession.class.getName());
-        log.info("httpSession:{},websocketSession:{}----",httpSession.getId(),session.getId());        
+        HttpSession httpSession = (HttpSession) config.getUserProperties().get(HttpSession.class.getName());
+        log.info("httpSessionId:{},websocketSessionId:{},sid:{}----",httpSession.getId(),session.getId(),sid);        
         bizSession.put(httpSession.getId(), session);//建立关联
-        webSocketMap.put(session, this);
-        webSocketSet.add(this);//加入set中
         addOnlineCount();//在线数加1
         log.info("有新连接加入！当前在线人数为" + getOnlineCount());
         try {
         	 sendMessage("["+httpSession.getId()+"]连接成功",session);
-        	 sendMessage("sessionId:"+httpSession.getId(),session);
+        	 //设定模拟线程
+        	 new Thread(new Heartbeat(session)).start();
         } catch (IOException e) {
             log.error("websocket IO异常");
         }
     }
     
     /**
-     * 连接关闭调用的方法
+     * <p>连接关闭调用的方法</p>
      */
     @OnClose
     public void onClose(Session closeSession,CloseReason reason) {
+    	log.info(reason.toString());
     	for(String key:bizSession.keySet()){
     		Session session = bizSession.get(key);
     		if(session.equals(closeSession)){
     			bizSession.remove(key);
     		}
     	}   	
-    	webSocketMap.remove(closeSession);
-        webSocketSet.remove(closeSession);  //从set中删除
         subOnlineCount();           //在线数减1
         log.info("有一连接关闭！当前在线人数为" + getOnlineCount());
     }
 
     /**
-     * 收到客户端消息后调用的方法
+     * <p>收到客户端消息后调用的方法</p>
      *
      * @param message 客户端发送过来的消息*/
     @OnMessage
     public void onMessage(String message, Session mySession) {
     	log.info("来自客户端的消息:" + message);
-
-    	//推送给单个客户端
-		for (Session session : webSocketMap.keySet()) {
-			if (session.equals(mySession)) {
-				ServerEndpointConfigure item = (ServerEndpointConfigure) webSocketMap.get(mySession);
-				try {
-					item.sendMessage(message,session);
-				} catch (IOException e) {
-					e.printStackTrace();
-				}
-			}	
+    	try {
+			sendMessage(message, mySession);
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
     }
  
@@ -106,6 +92,12 @@ public class ServerEndpointConfigure {
     @OnError
     public void onError(Session session, Throwable error) {
         log.error("发生错误");
+        for(String key:bizSession.keySet()){
+    		Session sessionc = bizSession.get(key);
+    		if(session.equals(sessionc)){
+    			bizSession.remove(key);
+    		}
+    	} 
         error.printStackTrace();
     }
        
@@ -121,15 +113,15 @@ public class ServerEndpointConfigure {
     }
 
     
-    public static synchronized int getOnlineCount() {
-        return onlineCount;
+    public int getOnlineCount() {//获取当前值
+		return onlineCount.get();   	
     }
- 
-    public static synchronized void addOnlineCount() {
-    	ServerEndpointConfigure.onlineCount++;
+    
+    public int addOnlineCount() {//加1
+    	return onlineCount.getAndIncrement();
     }
- 
-    public static synchronized void subOnlineCount() {
-    	ServerEndpointConfigure.onlineCount--;
+   
+    public int subOnlineCount() {//减1
+    	return onlineCount.getAndDecrement();
     }
 }
