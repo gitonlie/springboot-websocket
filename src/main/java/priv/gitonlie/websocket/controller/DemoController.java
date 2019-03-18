@@ -29,6 +29,7 @@ public class DemoController {
     	HttpSession session = request.getSession();
     	model.addAttribute("sid", session.getId());
     	log.info("初始化websocket页面~");
+    	log.debug("websocket debug");
 		return "index";   	
     }
     

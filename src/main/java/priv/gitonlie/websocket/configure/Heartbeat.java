@@ -29,7 +29,7 @@ public class Heartbeat implements Runnable {
 		while(session.isOpen()) {
 			try {
 				String uuid = String.format("%04d", i++)+":the websoket heart is exist 3s";
-				log.info(uuid);
+				log.debug(uuid);
 				session.getBasicRemote().sendText(uuid);
 				Thread.sleep(1000*3);
 			} catch (Exception e) {
